@@ -1,0 +1,33 @@
+<?xml version='1.0' encoding='utf-8'?>
+<flow-definition plugin="workflow-job@2.6">
+  <actions />
+  <description />
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <com.dabsquared.gitlabjenkins.connection.GitLabConnectionProperty plugin="gitlab-plugin@1.4.0">
+      <gitLabConnection />
+    </com.dabsquared.gitlabjenkins.connection.GitLabConnectionProperty>
+    <org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+      <triggers />
+    </org.jenkinsci.plugins.workflow.job.properties.PipelineTriggersJobProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.13">
+    <script>env.SCM_URL            = "https://github.com/dreamOW/test.git"
+    env.SCM_BRANCH            = "master"
+    node {
+
+      stage 'CHECKOUT'
+        git  branch: "${env.SCM_BRANCH}",url: "${env.SCM_URL}"
+
+     stage 'PUBLISH'
+          sh 'docker login -u admin -p Harbor12345 registry.chinacloudapp.cn:8080'
+          sh 'docker tag busybox:test registry.chinacloudapp.cn:8080/admin/busybox:test'
+          sh 'docker push registry.chinacloudapp.cn:8080/admin/busybox:test'
+      stage 'DEPLOY'
+          sh 'docker login -u admin -p Harbor12345 registry.chinacloudapp.cn:8080'
+          sh 'rancher-compose --project-name test --url http://54.222.207.126:8081/v1/ --access-key F4245A00346AD0FCC25E --secret-key pGbzmen19VK1WE89so8yh7pSjRULEpQBwSrqgcbx --verbose up -d --force-upgrade --pull --confirm-upgrade test'
+    }</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers />
+</flow-definition>
