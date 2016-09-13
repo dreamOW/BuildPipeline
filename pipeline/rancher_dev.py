@@ -42,7 +42,7 @@ def get_service_id(service_name):
 
 def get_service_image(environmentid , stackid, serviceid):
     httpClient = httplib.HTTPConnection('54.222.207.126:8081')
-    httpClient.request('GET','http://54.222.207.126:8081/v1/projects/'+stackid+'/services/'+serviceid, '', DEFAULT_HEADER)
+    httpClient.request('GET','http://54.222.207.126:8081/v1/projects/'+environmentid+'/services/'+serviceid, '', DEFAULT_HEADER)
     response = httpClient.getresponse()
     data=response.read()
     jdata = json.loads(data)

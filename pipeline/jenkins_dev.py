@@ -3,6 +3,7 @@ import jenkins
 from jenkinsapi.jenkins import Jenkins
 import datetime
 import rancher_dev
+from models import BuildPipeline
 
 
 JENKINS_HOST = 'http://127.0.0.1:8080/'
@@ -36,7 +37,7 @@ def parse_xml(data):
     text_node = xml_operation.get_node_by_keyvalue(xml_operation.find_nodes(tree, SCRIPT), {})
     scmurl = data['scmUrl']
     scmBranch = data['scmBranch']
-    credential = data['credential']
+    credential = data['scmCredential']
     if credential == '':
         credentialid = ''
     else:
@@ -46,15 +47,10 @@ def parse_xml(data):
     password = data['password']
     image = data['pipelineName'] + ':' + data['username']
     harbor_image = 'registry.chinacloudapp.cn:8080/'+data['username']+'/'+image
-    stackname = data['deployStack']
-    servicename = data['deployService']
-    print data['deployProjectId']
-    print data['deployStackId']
-    print data['deployServiceId']
-    tmp = rancher_dev.get_service_image(data['deployProjectId'],data['deployStackId'],data['deployServiceId'])
-    service_image = tmp[7:]
-    access_key = data['apiKey'].split(':')[0]
-    secret_key = data['apiKey'].split(':')[1]
+    print 'in there'
+    access_key = data['apikey'].split(':')[0]
+    secret_key = data['apikey'].split(':')[1]
+    print 'in there'
     script = '''env.SCM_URL            = "''' + scmurl + '''"
     env.SCM_BRANCH            = "''' + scmBranch + '''"
     node {
@@ -67,16 +63,21 @@ def parse_xml(data):
           sh 'docker login -u ''' + username + ''' -p ''' + password + ''' registry.chinacloudapp.cn:8080'
           sh 'docker tag '''+image+''' registry.chinacloudapp.cn:8080/''' + username + '''/''' + image + ''''
           sh 'docker push registry.chinacloudapp.cn:8080/''' + username + '''/''' + image+"'"
-
-    deploy = '''stage 'DEPLOY'
-          sh 'docker login -u ''' + username + ''' -p ''' + password + ''' registry.chinacloudapp.cn:8080'
-          sh 'wget -O compose.zip http://54.222.207.126:8081/v1/projects/1a127/environments/1e1/composeconfig?token=sQNAeGgHwuJ8C3BcGzygsHn6kRsAhQ2DnNArsWUS&projectId=1a127'
-          sh 'tar -xf compose.zip'
-          sh "sed -in-place -e '/'''+servicename+'''/,/stdin_open/s#'''+service_image+'#'+harbor_image+'''#g' docker-compose.yml"
-          sh 'rm docker-compose.ymln-place'
-          sh 'rancher-compose --project-name ''' + stackname + ''' --url http://54.222.207.126:8081/v1/ --access-key ''' + access_key + ''' --secret-key ''' + secret_key + ''' --verbose up -d --force-upgrade --pull --confirm-upgrade ''' + servicename + ''''
-    }'''
     if data['autoDeploy'] :
+        stackname = data['deployStackName']
+        servicename = data['deployServiceName']
+        tmp = rancher_dev.get_service_image(data['deployProjectId'], data['deployStackId'], data['deployServiceId'])
+        service_image = tmp[7:]
+        deploy = '''stage 'DEPLOY'
+                  sh 'docker login -u ''' + username + ''' -p ''' + password + ''' registry.chinacloudapp.cn:8080'
+                  sh 'wget --http-user=F4245A00346AD0FCC25E  --http-passwd=pGbzmen19VK1WE89so8yh7pSjRULEpQBwSrqgcbx -O compose.zip http://54.222.207.126:8081/v1/projects/''' + \
+                 data['deployProjectId'] + '''/environments/''' + data[
+                     'deployStackId'] + '''/composeconfig?projectId=''' + data['deployProjectId'] + ''''
+                  sh 'tar -xf compose.zip'
+                  sh "sed -in-place -e '/''' + servicename + '''/,/stdin_open/s#''' + service_image + '#' + harbor_image + '''#g' docker-compose.yml"
+                  sh 'rm docker-compose.ymln-place'
+                  sh 'rancher-compose --project-name ''' + stackname + ''' --url http://54.222.207.126:8081/v1/ --access-key ''' + access_key + ''' --secret-key ''' + secret_key + ''' --verbose up -d --force-upgrade --pull --confirm-upgrade ''' + servicename + ''''
+            }'''
         temp = script
         script = temp + '\n'+deploy
     else:
@@ -126,17 +127,18 @@ def delete_job(job_name):
 def get_job_status(jobname):
     flag = is_build_complete(jobname)
     if flag:
-        result = {'buildPipeLineName': jobname, 'status': 'RUNNING'}
+        result = {'buildPipelineName': jobname, 'status': 'building'}
         return result
     else:
         color = server.get_job_info(jobname)['color']
+        print color
         if color == 'red':
-            status = 'FAILURE'
-            if color == 'blue':
-                status = 'SUCCESS'
+            status = 'failure'
+        elif color == 'blue':
+            status = 'success'
         else:
-            status = 'CREATED'
-        result = {'buildPipeLineName': jobname, 'status': status}
+            status = 'created'
+        result = {'buildPipelineName': jobname, 'status': status}
         return result
 
 
@@ -146,39 +148,41 @@ def get_build_status(jobname,buildid):
     build = j.get_build(buildid)
     flag = build.is_running()
     if flag:
-        return 'RUNNING'
+        return 'building'
     else:
         return build.get_status()
 
 
 def get_single_buildpipeline_info(jobname):
-    server = get_server_instance()
-    j = server.get_job(jobname)
+    server1 = get_server_instance()
+    j = server1.get_job(jobname)
     result = {}
-    result['buildPipeLineName'] = j.name
+    result['buildPipelineName'] = j.name
     result['status'] = get_job_status(jobname)['status']
+    print result['status']
     check = j.get_last_build_or_none()
-    if check == None:
+    if check is None:
         result['lasteBuildStatus'] = ""
-        result['lasteBuildEndData'] = ""
+        result['lasteBuildEndDate'] = ""
         result['createData'] = ""
     else:
         result['lasteBuildStatus'] = get_build_status(jobname,j.get_last_build().get_number())
-        lasteBuildEndData = datetime.datetime.strftime(
+        lasteBuildEndDate = datetime.datetime.strftime(
             j.get_last_build().get_timestamp() + j.get_last_build().get_duration(), '%Y-%m-%d %H:%M:%S')
-        result['lasteBuildEndData'] = lasteBuildEndData
-        createData = datetime.datetime.strftime(j.get_first_build().get_timestamp(), '%Y-%m-%d %H:%M:%S')
-        result['createData'] = createData
+        result['lasteBuildEndDate'] = lasteBuildEndDate
+        createDate = datetime.datetime.strftime(j.get_first_build().get_timestamp(), '%Y-%m-%d %H:%M:%S')
+        result['createDate'] = createDate
+    print 'in there'
     result['scmType'] = BuildPipeline.objects.get(project_name=jobname).scm_type
-    result['scmUrl'] = BuildPipeline.objects.get(project_name=jobname).scm_type
-    result['branch'] = BuildPipeline.objects.get(project_name=jobname).scm_type
-    result['imageName'] = BuildPipeline.objects.get(project_name=jobname).scm_type
+    result['scmUrl'] = BuildPipeline.objects.get(project_name=jobname).scm_url
+    result['scmBranch'] = BuildPipeline.objects.get(project_name=jobname).scm_branch
+    result['imageName'] = j.name+':'+BuildPipeline.objects.get(project_name=jobname).username
     result['mirrorType'] = BuildPipeline.objects.get(project_name=jobname).mirror_type
     result['mirroTypeScript'] = BuildPipeline.objects.get(project_name=jobname).mirror_script_type
-    result['excute'] = BuildPipeline.objects.get(project_name=jobname).mirror_script
+    result['mirrorScript'] = BuildPipeline.objects.get(project_name=jobname).mirror_script
     result['autoDeploy'] = BuildPipeline.objects.get(project_name=jobname).auto_delpoy
-    deploy = {'stackName': BuildPipeline.objects.get(project_name=jobname).deploy_stack, 'serverName': BuildPipeline.objects.get(project_name=jobname).deploy_service}
-    result['deploy'] = deploy
+    result['stackName'] =  BuildPipeline.objects.get(project_name=jobname).deploy_stack
+    result['serviceName'] = BuildPipeline.objects.get(project_name=jobname).deploy_service
     return result
 
 
@@ -191,26 +195,30 @@ def get_job_list():
         job = server1.get_job(j[0])
         buildpipeline = {}
         jobname = job.name
-        buildpipeline['buildPipeLineName'] = jobname
+        buildpipeline['buildPipelineName'] = jobname
+        print get_job_status(jobname)['status']
         buildpipeline['status'] = get_job_status(jobname)['status']
         check = job.get_last_build_or_none()
-        if check == None:
+        if check is None:
             buildpipeline['lasteBuildStatus'] = ''
-            buildpipeline['lasteBuildEndData'] = ''
+            buildpipeline['lasteBuildEndDate'] = ''
             buildpipeline['createData'] = ''
         else:
             buildpipeline['lasteBuildStatus'] = get_build_status(jobname, job.get_last_build().get_number())
             last_build_Data = datetime.datetime.strftime(job.get_last_build().get_timestamp()+job.get_last_build().get_duration(), '%Y-%m-%d %H:%M:%S')
-            buildpipeline['lasteBuildEndData'] = last_build_Data
+            buildpipeline['lasteBuildEndDate'] = last_build_Data
             create_data = datetime.datetime.strftime(job.get_first_build().get_timestamp(), '%Y-%m-%d %H:%M:%S')
             buildpipeline['createData'] = create_data
+        print 'in there'
         buildpipeline['scmType'] = BuildPipeline.objects.get(project_name=jobname).scm_type
         buildpipeline['scmUrl'] = BuildPipeline.objects.get(project_name=jobname).scm_url
         buildpipeline['autoDeploy'] = BuildPipeline.objects.get(project_name=jobname).auto_delpoy
+        print 'in there'
         buildpipelines.append(buildpipeline)
         i = i +1
     result['totalNum'] = i
-    result['buildPipeLines'] = buildpipelines
+    print 'in there'
+    result['buildPipelines'] = buildpipelines
     return result
 
 
@@ -219,27 +227,29 @@ def get_build_list(jobname):
     server1 = get_server_instance()
     j = server1.get_job(jobname)
     build_ids = j.get_build_ids()
+    print 'in there'
     result = {}
     builds = []
     i = 0
     for build_id in build_ids:
         build = {}
+        build['buildPipelineName'] = jobname
         build['buildId'] = build_id
         build['status'] = get_build_status(jobname,build_id)
         check = j.get_last_build_or_none()
-        if check == None:
-            build['buildStartData'] = ''
-            build['buildEndData'] = ''
+        if check is None:
+            build['buildStartDate'] = ''
+            build['buildEndDate'] = ''
         else:
             build_start_data = datetime.datetime.strftime(j.get_last_build().get_timestamp(), '%Y-%m-%d %H:%M:%S')
-            build['buildStartData'] = build_start_data
+            build['buildStartDate'] = build_start_data
             build_end_data = datetime.datetime.strftime(j.get_build(build_id).get_timestamp() + j.get_build(build_id).get_duration(), '%Y-%m-%d %H:%M:%S')
-            build['buildEndData'] = build_end_data
+            build['buildEndDate'] = build_end_data
         build['result'] = j.get_build(build_id).is_good()
         builds.append(build)
         i = i + 1
     result['totalNum'] = i
-    result['buildHistory'] = builds
+    result['builds'] = builds
     return result
 
 
@@ -247,20 +257,22 @@ def get_build_log(jobname, buildnum):
     server1 = get_server_instance()
     j = server1.get_job(jobname)
     result = {}
-    try:
-       build_info = j.get_build(buildnum)
-    except:
-        return "No Such Build"
-    else:
-        result['buildId'] = buildnum
-        result['status'] = get_build_status(jobname,buildnum)
-        build_start_data = datetime.datetime.strftime(build_info.get_timestamp(), '%Y-%m-%d %H:%M:%S')
-        result['buildStartData'] = build_start_data
-        build_end_data = datetime.datetime.strftime(build_info.get_timestamp() + build_info.get_duration(), '%Y-%m-%d %H:%M:%S')
-        result['buildEndData'] = build_end_data
-        result['result'] = build_info.is_good()
-        result['buildLog'] = build_info.get_console()
-        return result
+    #try:
+    buidldid = int(buildnum)
+    build_info = j.get_build(buidldid)
+    #except:
+        #return "No Such Build"
+    #else:
+    result['buildPipelineName'] = jobname
+    result['buildId'] = buildnum
+    result['status'] = get_build_status(jobname, buidldid)
+    build_start_data = datetime.datetime.strftime(build_info.get_timestamp(), '%Y-%m-%d %H:%M:%S')
+    result['buildStartDate'] = build_start_data
+    build_end_data = datetime.datetime.strftime(build_info.get_timestamp() + build_info.get_duration(), '%Y-%m-%d %H:%M:%S')
+    result['buildEndDate'] = build_end_data
+    result['result'] = build_info.is_good()
+    result['log'] = build_info.get_console()
+    return result
 
 
 def is_build_complete(jobname):
